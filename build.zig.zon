@@ -1,0 +1,12 @@
+.{
+    .name = .curation,
+    .version = "0.0.0",
+    .fingerprint = 0x8c9a89d9b14441f8,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

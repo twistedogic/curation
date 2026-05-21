@@ -1,0 +1,25 @@
+version: '3'
+
+vars:
+  OPTIMIZE: '{{.OPTIMIZE | default "Debug"}}'
+
+tasks:
+  build:
+    desc: Build the curation binary
+    cmds:
+      - zig build -Doptimize={{.OPTIMIZE}}
+
+  test:
+    desc: Run tests
+    cmds:
+      - zig build test
+
+  run:
+    desc: Build and run with optional args (task run -- arg1 arg2)
+    cmds:
+      - zig build run {{.CLI_ARGS}}
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf zig-out .zig-cache
