@@ -1,0 +1,6 @@
+[submodule "feeds/awesome-rss-feeds"]
+	path = feeds/awesome-rss-feeds
+	url = https://github.com/plenaryapp/awesome-rss-feeds
+[submodule "cmd/curation/feeds/awesome-rss-feeds"]
+	path = cmd/curation/feeds/awesome-rss-feeds
+	url = https://github.com/plenaryapp/awesome-rss-feeds

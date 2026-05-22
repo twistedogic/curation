@@ -2,6 +2,7 @@ package opml
 
 import (
 	"encoding/xml"
+	"io"
 	"os"
 )
 
@@ -18,6 +19,51 @@ type Parser struct{}
 // New creates a new OPML parser.
 func New() *Parser {
 	return &Parser{}
+}
+
+// ParseReader reads OPML from an io.Reader and returns all discovered RSS feeds.
+func (p *Parser) ParseReader(r io.Reader) ([]Feed, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var doc opmlDoc
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+
+	var feeds []Feed
+	for _, outline := range doc.Body.Outlines {
+		if outline.XMLURL != "" {
+			feeds = append(feeds, Feed{
+				URL:    outline.XMLURL,
+				Name:   outline.Text,
+				SiteURL: outline.HTMLURL,
+			})
+		}
+		for _, sub := range outline.Outlines {
+			if sub.XMLURL != "" {
+				feeds = append(feeds, Feed{
+					URL:    sub.XMLURL,
+					Name:   sub.Text,
+					SiteURL: sub.HTMLURL,
+				})
+			}
+		}
+	}
+
+	return feeds, nil
+}
+
+// FeedList represents a flat list of outlines for listing feeds.
+type FeedList struct {
+	XMLName xml.Name       `xml:"opml"`
+	Body    feedListBody   `xml:"body"`
+}
+
+type feedListBody struct {
+	Outlines []opmlOutline `xml:"outline"`
 }
 
 // Parse reads an OPML file and returns all discovered RSS feeds.

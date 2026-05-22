@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"embed"
+	"encoding/xml"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,6 +17,10 @@ import (
 	"curation/internal/opml"
 	"curation/internal/scraper"
 )
+
+//go:embed feeds/awesome-rss-feeds/countries/**/*.opml
+//go:embed feeds/awesome-rss-feeds/recommended/**/*.opml
+var opmlFS embed.FS
 
 func main() {
 	if err := run(os.Args); err != nil {
@@ -31,8 +38,10 @@ func run(args []string) error {
 		return fetchCmd(args[2:])
 	case "scrape":
 		return scrapeCmd(args[2:])
+	case "list-feeds":
+		return listFeedsCmd(args[2:])
 	default:
-		return fmt.Errorf("unknown command: %s\nusage: curation <fetch|scrape>", args[1])
+		return fmt.Errorf("unknown command: %s\nusage: curation <fetch|scrape|list-feeds>", args[1])
 	}
 }
 
@@ -122,6 +131,118 @@ func scrapeCmd(args []string) error {
 		return fmt.Errorf("scrape failed: %w", err)
 	}
 	fmt.Println(content)
+	return nil
+}
+
+func listFeedsCmd(args []string) error {
+	fs := flag.NewFlagSet("list-feeds", flag.ContinueOnError)
+	var region string
+	fs.StringVar(&region, "region", "", "Filter by region/country (e.g., Hong Kong, China, USA)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// List available OPML files in embedded FS
+	// The embed directive embeds files from feeds/awesome-rss-feeds/*
+	// We walk the directory structure to find .opml files
+	dirs := []string{
+		"feeds/awesome-rss-feeds/countries",
+		"feeds/awesome-rss-feeds/recommended",
+	}
+
+	fmt.Println("Available feeds from awesome-rss-feeds:")
+	fmt.Println(strings.Repeat("-", 50))
+
+	type feedFile struct {
+		category string
+		path     string
+		name     string
+	}
+
+	var allFiles []feedFile
+
+	// Walk through both top-level directories
+	for _, base := range dirs {
+		entries, err := opmlFS.ReadDir(base)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read %s: %v\n", base, err)
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			subEntries, err := opmlFS.ReadDir(base + "/" + entry.Name())
+			if err != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				if sub.IsDir() {
+					// Two levels deep (with_category/without_category)
+					category := entry.Name() + "/" + sub.Name()
+					subSubEntries, err := opmlFS.ReadDir(base + "/" + entry.Name() + "/" + sub.Name())
+					if err != nil {
+						continue
+					}
+					for _, f := range subSubEntries {
+						if !f.IsDir() && strings.HasSuffix(f.Name(), ".opml") {
+							name := strings.TrimSuffix(f.Name(), ".opml")
+							// Filter by region if specified
+							if region != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(region)) {
+								continue
+							}
+							allFiles = append(allFiles, feedFile{category: category, name: name, path: base + "/" + entry.Name() + "/" + sub.Name() + "/" + f.Name()})
+						}
+					}
+				} else if !sub.IsDir() && strings.HasSuffix(sub.Name(), ".opml") {
+					name := strings.TrimSuffix(sub.Name(), ".opml")
+					if region != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(region)) {
+						continue
+					}
+					allFiles = append(allFiles, feedFile{category: entry.Name(), name: name, path: base + "/" + entry.Name() + "/" + sub.Name()})
+				}
+			}
+		}
+	}
+
+	// Group by category
+	byCategory := make(map[string][]feedFile)
+	for _, f := range allFiles {
+		byCategory[f.category] = append(byCategory[f.category], f)
+	}
+
+	for cat, files := range byCategory {
+		fmt.Printf("## %s\n", cat)
+		for _, f := range files {
+			fmt.Printf("  [%s]\n", f.name)
+			// Read the OPML and list individual feeds
+			fh, err := opmlFS.Open(f.path)
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(fh)
+			fh.Close()
+			if err != nil {
+				continue
+			}
+
+			var feedList opml.FeedList
+			if err := xml.Unmarshal(data, &feedList); err != nil {
+				continue
+			}
+
+			for _, outline := range feedList.Body.Outlines {
+				if outline.XMLURL != "" {
+					title := outline.Text
+					if title == "" {
+						title = "unnamed"
+					}
+					fmt.Printf("    - %s: %s\n", title, outline.XMLURL)
+				}
+			}
+		}
+		fmt.Println()
+	}
 	return nil
 }
 
