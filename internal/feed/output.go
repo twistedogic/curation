@@ -72,6 +72,35 @@ func FormatConsole(w io.Writer, items []Item) error {
 	return nil
 }
 
+// FormatMarkdown outputs items as a markdown digest to w.
+func FormatMarkdown(w io.Writer, items []Item) error {
+	if len(items) == 0 {
+		fmt.Fprintln(w, "_No items found._")
+		return nil
+	}
+	fmt.Fprintf(w, "## Curated Digest\n")
+	fmt.Fprintf(w, "_Generated: %s_\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	for i, item := range items {
+		pubDate := ""
+		if !item.PubDate.IsZero() {
+			pubDate = item.PubDate.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(w, "### %d. %s\n", i+1, item.Title)
+		fmt.Fprintf(w, "- **Source:** [%s](%s)\n", item.Source, item.URL)
+		if pubDate != "" {
+			fmt.Fprintf(w, "- **Date:** %s\n", pubDate)
+		}
+		if len(item.Categories) > 0 {
+			fmt.Fprintf(w, "- **Categories:** %s\n", joinCategories(item.Categories))
+		}
+		if item.Description != "" {
+			fmt.Fprintf(w, "\n%s\n", truncate(item.Description, 500))
+		}
+		fmt.Fprintln(w)
+	}
+	return nil
+}
+
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s

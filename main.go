@@ -52,7 +52,7 @@ func fetchCmd(args []string) error {
 	fs.StringVar(&opmlPath, "opml", "", "Path to OPML file")
 	fs.StringVar(&topicsStr, "topics", "", "Comma-separated topic keywords")
 	fs.IntVar(&limit, "limit", 10, "Max articles per feed")
-	fs.StringVar(&output, "output", "console", "Output format: console, json")
+	fs.StringVar(&output, "output", "console", "Output format: console, json, markdown")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -110,6 +110,8 @@ func fetchCmd(args []string) error {
 	switch output {
 	case "json":
 		return feed.FormatJSON(os.Stdout, allItems)
+	case "markdown":
+		return feed.FormatMarkdown(os.Stdout, allItems)
 	default:
 		return feed.FormatConsole(os.Stdout, allItems)
 	}

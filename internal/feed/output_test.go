@@ -74,6 +74,52 @@ func TestFormatJSONEmpty(t *testing.T) {
 	}
 }
 
+func TestFormatMarkdown(t *testing.T) {
+	items := []Item{
+		{
+			Title:       "Test Article",
+			URL:         "https://example.com/article",
+			Source:      "TestFeed",
+			PubDate:     time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
+			Categories:  []string{"Tech", "AI"},
+			Description: "This is a test article description.",
+		},
+	}
+
+	var sb strings.Builder
+	err := FormatMarkdown(&sb, items)
+	if err != nil {
+		t.Errorf("FormatMarkdown failed: %v", err)
+	}
+
+	out := sb.String()
+	if !strings.Contains(out, "## Curated Digest") {
+		t.Errorf("Markdown missing header: %s", out)
+	}
+	if !strings.Contains(out, "### 1. Test Article") {
+		t.Errorf("Markdown missing title: %s", out)
+	}
+	if !strings.Contains(out, "- **Source:** [TestFeed](https://example.com/article)") {
+		t.Errorf("Markdown missing source link: %s", out)
+	}
+	if !strings.Contains(out, "Tech, AI") {
+		t.Errorf("Markdown missing categories: %s", out)
+	}
+}
+
+func TestFormatMarkdownEmpty(t *testing.T) {
+	var sb strings.Builder
+	err := FormatMarkdown(&sb, []Item{})
+	if err != nil {
+		t.Errorf("FormatMarkdown empty failed: %v", err)
+	}
+
+	out := sb.String()
+	if !strings.Contains(out, "_No items found._") {
+		t.Errorf("Markdown empty output wrong: %s", out)
+	}
+}
+
 func TestStripHTML(t *testing.T) {
 	tests := []struct {
 		input    string
