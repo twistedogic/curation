@@ -18,9 +18,9 @@ import (
 	"curation/internal/scraper"
 )
 
-//go:embed feeds/awesome-rss-feeds/countries/**/*.opml
-//go:embed feeds/awesome-rss-feeds/recommended/**/*.opml
-var opmlFS embed.FS
+//go:embed awesome-rss-feeds/countries
+//go:embed awesome-rss-feeds/recommended
+var embeddedFeeds embed.FS
 
 func main() {
 	if err := run(os.Args); err != nil {
@@ -146,8 +146,8 @@ func listFeedsCmd(args []string) error {
 	// The embed directive embeds files from feeds/awesome-rss-feeds/*
 	// We walk the directory structure to find .opml files
 	dirs := []string{
-		"feeds/awesome-rss-feeds/countries",
-		"feeds/awesome-rss-feeds/recommended",
+		"feeds/countries",
+		"feeds/recommended",
 	}
 
 	fmt.Println("Available feeds from awesome-rss-feeds:")
@@ -163,7 +163,7 @@ func listFeedsCmd(args []string) error {
 
 	// Walk through both top-level directories
 	for _, base := range dirs {
-		entries, err := opmlFS.ReadDir(base)
+		entries, err := embeddedFeeds.ReadDir(base)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to read %s: %v\n", base, err)
 			continue
@@ -172,7 +172,7 @@ func listFeedsCmd(args []string) error {
 			if !entry.IsDir() {
 				continue
 			}
-			subEntries, err := opmlFS.ReadDir(base + "/" + entry.Name())
+			subEntries, err := embeddedFeeds.ReadDir(base + "/" + entry.Name())
 			if err != nil {
 				continue
 			}
@@ -180,7 +180,7 @@ func listFeedsCmd(args []string) error {
 				if sub.IsDir() {
 					// Two levels deep (with_category/without_category)
 					category := entry.Name() + "/" + sub.Name()
-					subSubEntries, err := opmlFS.ReadDir(base + "/" + entry.Name() + "/" + sub.Name())
+					subSubEntries, err := embeddedFeeds.ReadDir(base + "/" + entry.Name() + "/" + sub.Name())
 					if err != nil {
 						continue
 					}
@@ -216,7 +216,7 @@ func listFeedsCmd(args []string) error {
 		for _, f := range files {
 			fmt.Printf("  [%s]\n", f.name)
 			// Read the OPML and list individual feeds
-			fh, err := opmlFS.Open(f.path)
+			fh, err := embeddedFeeds.Open(f.path)
 			if err != nil {
 				continue
 			}
@@ -263,3 +263,4 @@ func truncate(s string, max int) string {
 	}
 	return s[:max] + "..."
 }
+
