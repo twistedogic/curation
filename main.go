@@ -148,8 +148,8 @@ func listFeedsCmd(args []string) error {
 	// The embed directive embeds files from feeds/awesome-rss-feeds/*
 	// We walk the directory structure to find .opml files
 	dirs := []string{
-		"feeds/countries",
-		"feeds/recommended",
+		"awesome-rss-feeds/countries",
+		"awesome-rss-feeds/recommended",
 	}
 
 	fmt.Println("Available feeds from awesome-rss-feeds:")
