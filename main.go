@@ -16,6 +16,7 @@ import (
 	"curation/internal/feed"
 	"curation/internal/opml"
 	"curation/internal/scraper"
+	"curation/internal/server"
 )
 
 //go:embed awesome-rss-feeds/countries
@@ -40,6 +41,8 @@ func run(args []string) error {
 		return scrapeCmd(args[2:])
 	case "list-feeds":
 		return listFeedsCmd(args[2:])
+	case "serve":
+		return serveCmd(args[2:])
 	default:
 		return fmt.Errorf("unknown command: %s\nusage: curation <fetch|scrape|list-feeds>", args[1])
 	}
@@ -264,5 +267,34 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func serveCmd(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	var opmlPath, topicsStr string
+	var interval, port int
+	fs.StringVar(&opmlPath, "opml", "", "Path to OPML file (required)")
+	fs.StringVar(&topicsStr, "topics", "", "Comma-separated topic keywords (required)")
+	fs.IntVar(&interval, "interval", 30, "Polling interval in minutes (default: 30)")
+	fs.IntVar(&port, "port", 8080, "HTTP server port (default: 8080)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if opmlPath == "" || topicsStr == "" {
+		return fmt.Errorf("--opml and --topics are required")
+	}
+
+	cfg := server.DefaultConfig()
+	cfg.Port = port
+	cfg.Interval = time.Duration(interval) * time.Minute
+	cfg.ListenAddr = fmt.Sprintf("0.0.0.0:%d", port)
+
+	srv := server.New(cfg)
+	srv.SetOPML(opmlPath, topicsStr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	return srv.Start(ctx)
 }
 
