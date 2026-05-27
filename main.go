@@ -17,6 +17,7 @@ import (
 	"github.com/twistedogic/curation/internal/opml"
 	"github.com/twistedogic/curation/internal/scraper"
 	"github.com/twistedogic/curation/internal/server"
+	"github.com/twistedogic/curation/internal/store"
 )
 
 //go:embed awesome-rss-feeds/countries
@@ -43,19 +44,22 @@ func run(args []string) error {
 		return listFeedsCmd(args[2:])
 	case "serve":
 		return serveCmd(args[2:])
+	case "query":
+		return queryCmd(args[2:])
 	default:
-		return fmt.Errorf("unknown command: %s\nusage: curation <fetch|scrape|list-feeds>", args[1])
+		return fmt.Errorf("unknown command: %s\nusage: curation <fetch|scrape|list-feeds|serve|query>", args[1])
 	}
 }
 
 func fetchCmd(args []string) error {
 	fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
-	var opmlPath, topicsStr, output string
+	var opmlPath, topicsStr, output, dbPath string
 	var limit int
 	fs.StringVar(&opmlPath, "opml", "", "Path to OPML file")
 	fs.StringVar(&topicsStr, "topics", "", "Comma-separated topic keywords")
 	fs.IntVar(&limit, "limit", 10, "Max articles per feed")
 	fs.StringVar(&output, "output", "console", "Output format: console, json, markdown")
+	fs.StringVar(&dbPath, "db", "", "Path to DuckDB file for persistence (optional)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,14 +103,34 @@ func fetchCmd(args []string) error {
 		}
 	}
 
-	// Scrape article content for top items
+	scrapedContent := make(map[string]store.ScrapedContent)
 	for i := range allItems {
 		if allItems[i].URL != "" && ctx.Err() == nil {
-			content, err := articleScraper.Scrape(ctx, allItems[i].URL)
-			if err == nil && content != "" {
-				allItems[i].Description = truncate(content, 500)
+			body, err := articleScraper.Scrape(ctx, allItems[i].URL)
+			if err == nil && body != "" {
+				sc := store.ScrapedContent{
+					Description: allItems[i].Description,
+					Body:        body,
+				}
+				scrapedContent[allItems[i].URL] = sc
+				if dbPath == "" {
+					allItems[i].Description = truncate(body, 500)
+				} else {
+					allItems[i].Description = body
+				}
 			}
 			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	if dbPath != "" {
+		st, err := store.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("open db: %w", err)
+		}
+		defer st.Close()
+		if err := st.Save(allItems, scrapedContent); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save to db: %v\n", err)
 		}
 	}
 
@@ -267,6 +291,109 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func queryCmd(args []string) error {
+	fs := flag.NewFlagSet("query", flag.ContinueOnError)
+	var dbPath, topicsStr, output, sinceStr, untilStr string
+	var limit int
+	var full bool
+	fs.StringVar(&dbPath, "db", "", "Path to DuckDB file (required)")
+	fs.StringVar(&topicsStr, "topics", "", "Comma-separated topic keywords")
+	fs.StringVar(&sinceStr, "since", "1d", "Start of time range (e.g. 1d, 7d, 2h, 2026-05-01)")
+	fs.StringVar(&untilStr, "until", "", "End of time range (default: now)")
+	fs.IntVar(&limit, "limit", 50, "Max results to return")
+	fs.StringVar(&output, "output", "console", "Output format: console, json, markdown")
+	fs.BoolVar(&full, "full", false, "Include full scraped body in output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if dbPath == "" {
+		return fmt.Errorf("--db is required")
+	}
+
+	now := time.Now()
+	until := now
+	if untilStr != "" {
+		t, err := parseTimeArg(untilStr, now)
+		if err != nil {
+			return fmt.Errorf("--until: %w", err)
+		}
+		until = t
+	}
+	since, err := parseTimeArg(sinceStr, until)
+	if err != nil {
+		return fmt.Errorf("--since: %w", err)
+	}
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer st.Close()
+
+	opts := store.QueryOpts{
+		Since:  since,
+		Until:  until,
+		Topics: parseTopics(topicsStr),
+		Limit:  limit,
+		Full:   full,
+	}
+
+	ctx := context.Background()
+	items, scraped, err := st.Query(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	if full {
+		for i, item := range items {
+			if sc, ok := scraped[item.URL]; ok {
+				if sc.Body != "" {
+					items[i].Description = sc.Body
+				} else {
+					items[i].Description = sc.Description
+				}
+			}
+		}
+	}
+
+	switch output {
+	case "json":
+		return feed.FormatJSON(os.Stdout, items)
+	case "markdown":
+		return feed.FormatMarkdown(os.Stdout, items)
+	default:
+		return feed.FormatConsole(os.Stdout, items)
+	}
+}
+
+// parseTimeArg parses a relative duration (1d, 7d, 2h, 30m) or absolute date (2006-01-02)
+// and returns the corresponding time subtracted from ref (for relative) or parsed directly.
+func parseTimeArg(s string, ref time.Time) (time.Time, error) {
+	if len(s) > 1 {
+		unit := s[len(s)-1]
+		numStr := s[:len(s)-1]
+		switch unit {
+		case 'd', 'h', 'm':
+			var n int
+			if _, err := fmt.Sscanf(numStr, "%d", &n); err == nil {
+				switch unit {
+				case 'd':
+					return ref.Add(-time.Duration(n) * 24 * time.Hour), nil
+				case 'h':
+					return ref.Add(-time.Duration(n) * time.Hour), nil
+				case 'm':
+					return ref.Add(-time.Duration(n) * time.Minute), nil
+				}
+			}
+		}
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unrecognized time format %q (use e.g. 1d, 7d, 2h, 30m, or 2026-05-01)", s)
+	}
+	return t, nil
 }
 
 func serveCmd(args []string) error {
