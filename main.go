@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"curation/internal/feed"
-	"curation/internal/opml"
-	"curation/internal/scraper"
-	"curation/internal/server"
+	"github.com/twistedogic/curation/internal/feed"
+	"github.com/twistedogic/curation/internal/opml"
+	"github.com/twistedogic/curation/internal/scraper"
+	"github.com/twistedogic/curation/internal/server"
 )
 
 //go:embed awesome-rss-feeds/countries

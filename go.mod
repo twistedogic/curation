@@ -1,3 +1,5 @@
-module curation
+module github.com/twistedogic/curation
 
-go 1.21
+go 1.26
+
+toolchain go1.26.3
