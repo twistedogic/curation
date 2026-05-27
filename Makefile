@@ -1,10 +1,13 @@
-.PHONY: setup build test clean
+.PHONY: setup check build test clean
 
 setup:
 	git submodule update --init --recursive
 
-build: setup
+check: setup
 	go build ./...
+
+build: setup
+	go build -o curation .
 
 test: setup
 	go test ./...
