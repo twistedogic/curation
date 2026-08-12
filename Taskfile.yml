@@ -9,6 +9,15 @@ tasks:
     cmds:
       - zig build -Doptimize={{.OPTIMIZE}}
 
+  install:
+    desc: Build (ReleaseFast) and install the binary to PREFIX/bin (default $HOME/.local)
+    vars:
+      PREFIX: '{{.PREFIX | default (printf "%s/.local" (env "HOME"))}}'
+    cmds:
+      - zig build -Doptimize=ReleaseFast
+      - install -d {{.PREFIX}}/bin
+      - install -m 0755 zig-out/bin/curation {{.PREFIX}}/bin/curation
+
   test:
     desc: Run tests
     cmds:
