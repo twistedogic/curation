@@ -1,0 +1,8 @@
+schema: spec-driven
+created: 2026-08-12
+goal: "Add the embedded download UI (intent US-007/G8/FR-13): a single static
+  HTML/JS/CSS page embedded via @embedFile and served open at GET /, holding one
+  last-download token per kind plus the bearer token in browser localStorage and
+  driving GET /download per kind; own the first-download bootstrap deferred by
+  add-epub-download by extending GET /download to synthesize a kind's zero-token
+  when since is absent but kind is given."

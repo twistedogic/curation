@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-11
+goal: "Acquire items from configured feed sources: fetch RSS/Atom feeds over
+  HTTP and extract item records via a minimal tolerant parser, feeding the
+  existing curation pipeline. Decides the RSS/Atom XML-parsing approach early
+  (intent section 7 tech risk)."

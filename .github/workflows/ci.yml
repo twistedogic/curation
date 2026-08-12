@@ -8,6 +8,22 @@ on:
     branches: [main]
 
 jobs:
+  specs:
+    name: Validate OpenSpec Specs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Validate specs
+        run: npx -y @fission-ai/openspec@latest validate --specs
+
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-08-11
+goal: "Add per-kind incremental EPUB download: kind-scoped tokens, a stdlib-only
+  EPUB builder, and the bearer-authed GET /download endpoint that streams a
+  kind's items since a token (or 204)."

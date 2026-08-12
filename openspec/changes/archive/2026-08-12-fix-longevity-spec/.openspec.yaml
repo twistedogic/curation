@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-08-12
+goal: "Repair the structurally malformed longevity merged spec (a change-delta
+  header leaked into the main spec) so openspec validate --specs is green and the
+  longevity capability can be evolved again; add a CI guard against recurrence."

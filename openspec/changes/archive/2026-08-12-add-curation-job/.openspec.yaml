@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-08-11
+goal: "Add the daily curation job (intent US-002): an end-to-end orchestration
+  that fetches configured feed sources, runs the pure curation pipeline,
+  classifies each survivor's longevity via pi, and stores records split into the
+  news and knowledge streams. Exposed synchronously through a bearer-gated POST
+  /curate and run automatically by a built-in daily scheduler (default 04:00).
+  Adds sources and schedule to config and a store mutex for concurrent run/serve
+  access."

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-12
+goal: Persist curated items durably as an append-only JSONL log with a per-kind
+  in-memory index, consuming the Kind the longevity evaluator produces.

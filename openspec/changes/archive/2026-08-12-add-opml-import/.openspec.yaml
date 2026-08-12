@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-12
+goal: "Add OPML feed import (curation import <opml>) as the deferred follow-up
+  from intent Decision #6, reusing the existing tolerant XML scanner."

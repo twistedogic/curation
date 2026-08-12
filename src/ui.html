@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>curation</title>
+<style>
+  body { font-family: sans-serif; margin: 2em; max-width: 32em; color: #222; }
+  h1 { margin: 0 0 0.5em 0; }
+  .row { display: flex; align-items: center; gap: 0.6em; margin: 0.6em 0; }
+  button { padding: 0.4em 1em; }
+  input[type=password] { padding: 0.3em; flex: 1; }
+  .status { color: #555; font-style: italic; min-height: 1.2em; margin-left: 0.5em; }
+  .muted { color: #777; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>curation</h1>
+<p class="muted">Two download affordances (news, knowledge). Tokens and bearer are held in this browser only.</p>
+<div class="row">
+  <input id="bearer" type="password" placeholder="bearer token">
+  <button id="saveBearer">Save bearer</button>
+</div>
+<div class="row">
+  <button id="dlNews" data-kind="news">Download news</button>
+  <span class="status" id="statusNews"></span>
+</div>
+<div class="row">
+  <button id="dlKnowledge" data-kind="knowledge">Download knowledge</button>
+  <span class="status" id="statusKnowledge"></span>
+</div>
+<script>
+(function () {
+  var TOKEN_PREFIX = 'curation.token.';
+  var BEARER_KEY = 'curation.bearer';
+
+  function statusEl(kind) {
+    var name = 'status' + kind.charAt(0).toUpperCase() + kind.slice(1);
+    return document.getElementById(name);
+  }
+  function setStatus(kind, msg) {
+    var el = statusEl(kind);
+    if (el) el.textContent = msg;
+  }
+  function getBearer() { return localStorage.getItem(BEARER_KEY) || ''; }
+  function getToken(kind) { return localStorage.getItem(TOKEN_PREFIX + kind) || ''; }
+
+  function downloadKind(kind) {
+    var bearer = getBearer();
+    if (!bearer) { setStatus(kind, 'enter bearer first'); return; }
+    var since = getToken(kind);
+    var url = '/download';
+    url += since ? ('?since=' + encodeURIComponent(since)) : ('?kind=' + encodeURIComponent(kind));
+    setStatus(kind, 'downloading...');
+    fetch(url, { headers: { 'Authorization': 'Bearer ' + bearer } })
+      .then(function (r) {
+        if (r.status === 200) {
+          var next = r.headers.get('X-Next-Token');
+          return r.blob().then(function (blob) {
+            // Only an X-Next-Token header ever writes a token.
+            if (next) localStorage.setItem(TOKEN_PREFIX + kind, next);
+            triggerDownload(blob, 'curation-' + kind + '.epub');
+            setStatus(kind, 'downloaded');
+          });
+        }
+        if (r.status === 204) {
+          // Nothing new; leave the token as-is (absent during bootstrap).
+          setStatus(kind, 'nothing new');
+          return;
+        }
+        if (r.status === 401) {
+          // Re-prompt for the bearer; leave both the bearer and the kind
+          // tokens unchanged (only X-Next-Token ever writes a token).
+          setStatus(kind, 'bearer rejected; enter again');
+          return;
+        }
+        setStatus(kind, 'failed (' + r.status + ')');
+      })
+      .catch(function (err) {
+        setStatus(kind, 'error: ' + (err && err.message ? err.message : String(err)));
+      });
+  }
+
+  function triggerDownload(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('saveBearer').addEventListener('click', function () {
+    localStorage.setItem(BEARER_KEY, document.getElementById('bearer').value);
+    document.getElementById('bearer').value = '';
+  });
+
+  document.getElementById('dlNews').addEventListener('click', function () { downloadKind('news'); });
+  document.getElementById('dlKnowledge').addEventListener('click', function () { downloadKind('knowledge'); });
+})();
+</script>
+</body>
+</html>

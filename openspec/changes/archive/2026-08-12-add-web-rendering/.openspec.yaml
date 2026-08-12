@@ -1,0 +1,12 @@
+schema: spec-driven
+created: 2026-08-12
+goal: "Add web-content acquisition via the Lightpanda headless browser (intent
+  US-008 / FR-14): a sources-capability acquisition path that renders a
+  web-content URL out-of-process (`<path> fetch --dump <markdown|html> <url>`),
+  captures the rendered output as the item body, and feeds the same item model
+  the feed path uses. The curation run acquires configured web sources in
+  addition to feed sources, with per-source error isolation (a missing binary
+  or failed render is skipped and counted, never aborts the run). Adds a
+  `web_sources` list and a `lightpanda` config block to the server-owned
+  config. Standard library only; `zig build test` stays green. No new EPUB
+  kind, no provider credentials, and no age-based retention in this change."

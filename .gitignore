@@ -1,3 +1,4 @@
 .crush/
 zig-out/
 .zig-cache/
+zig-cache/

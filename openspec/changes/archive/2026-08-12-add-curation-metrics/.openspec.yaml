@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-12
+goal: "Close the US-006 observability gap: only HTTP request + uptime metrics
+  exist today; the domain metrics US-006 requires are unrecorded."

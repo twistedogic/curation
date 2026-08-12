@@ -1,0 +1,68 @@
+schema: spec-driven
+
+# Project context shown to AI when creating OpenSpec artifacts.
+context: |
+  curation: a single static-binary HTTP server (Zig 0.16.0, stdlib-only) that
+  curates RSS/Atom feeds and web content into incremental EPUB files for
+  offline e-reader reading. A daily curation job fetches sources, dedupes,
+  filters, tags, caps, then labels each surviving item short_term or long_term
+  via the local `pi` agent CLI. Items split into two per-kind streams — news
+  (short_term) and knowledge (long_term) — each with its own watermark and
+  incremental EPUB download (GET /download?since=<kind-scoped token>).
+
+  Tech stack:
+  - Language: Zig 0.16.0; stdlib-only, single static binary (no deps in
+    build.zig.zon).
+  - Stdlib covers the hard parts: std.http.Server/Client, std.zip (EPUB),
+    std.json (config + JSONL store), std.crypto.hash.sha2 (eval cache),
+    @embedFile (embedded UI). Reuse these before adding any dependency.
+  - External runtime tools are out-of-process and configured, never vendored:
+    * Lightpanda (`lightpanda fetch --dump markdown <url>`) renders web content;
+      missing binary / failed render -> source skipped and logged.
+    * `pi` (local agent CLI) is the ONLY model call (longevity classification).
+      curation holds no provider/model/API-key config — `pi` owns all of it.
+  - Config: JSON, default $XDG_CONFIG_HOME/curation/config.json (--config /
+    CURATION_CONFIG override).
+  - Storage: append-only JSONL item log + in-memory per-kind index; tokens are
+    base64("<kind>:<global_id>").
+
+  Conventions (from AGENTS.md / .see/intent.md):
+  - Automation through Taskfile.yml (Task): `task build`, `task test`,
+    `task run -- <args>`, `task validate`. Never break zig build / zig build test.
+  - Spec-driven: OpenSpec under openspec/ (specs + changes); validate with
+    `npx -y @fission-ai/openspec@latest validate --all`.
+  - Stdlib/native first; deletion over addition; boring over clever. The
+    shortest correct diff wins.
+  - Deliberate simplifications are marked `// ponytail: <ceiling>; upgrade when
+    <trigger>` so shortcuts are tracked, not forgotten.
+  - Structured key=value logging via src/log.zig (level/event/key=value);
+    Prometheus metrics on GET /metrics via src/metrics.zig for every server
+    operation.
+  - Every non-trivial logic path has a runnable self-check under zig build test
+    (co-located test blocks). A regression test is required for every bug fix.
+  - Spell out acronyms on first use, then the acronym alone.
+  - Never add agent names as commit author/co-author.
+
+  Design source of truth: .see/intent.md (requirements FR-*, decisions, and the
+  `ponytail:` convention). Capabilities live under openspec/specs/.
+
+# Per-artifact rules applied when generating OpenSpec artifacts.
+rules:
+  proposal:
+    - Keep proposals focused; reference the relevant intent.md requirements
+      and decisions and name every capability the change adds/modifies.
+    - Name the exact source files touched; call out any store, JSONL record,
+      token, EPUB-format, config-schema, or dependency change explicitly.
+    - No new in-binary dependency without justifying it against the
+      "stdlib first" principle in intent.md.
+  design:
+    - Prefer standard library and existing modules over new code or
+      dependencies; lift a helper to a shared util only if a second caller appears.
+    - Keep the pipeline deterministic; the only non-deterministic step is the
+      `pi` longevity evaluation, which is failure-tolerant and cached.
+    - Include or update a regression test for every non-trivial logic path.
+  tasks:
+    - Break work into small, verifiable steps; each step keeps
+      `zig build test` green.
+    - Include a regression-test task for any bug fix (reproduce first, failing
+      test before the fix).

@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-08-13
+goal: "Fix malformed XHTML in generated EPUBs: record title and body are
+  interpolated raw into each item's XHTML content document and into the
+  navigation document's link text, so any title or body containing &, <, >, \",
+  or ' yields invalid XHTML that violates intent G4 (a valid EPUB that renders
+  on common e-readers). XML-escape record text at every emission point and
+  extend the zig build test self-check to assert it, so the regression cannot
+  silently return."
