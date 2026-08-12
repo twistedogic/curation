@@ -1823,34 +1823,37 @@ test "handleRequest: GET /download that returns 204 does not bump the generation
 
 // ---- init command ----
 
-fn initTestEnv(gpa: std.mem.Allocator) std.process.Environ.Map {
-    var env = std.process.Environ.Map.init(gpa);
-    return env;
-}
+/// Stack buffer + stderr writer, owned together so the writer's buffer
+/// survives for the test's duration. Returns the interface pointer.
+const ErrWriter = struct {
+    buf: [256]u8,
+    writer: std.Io.File.Writer,
+
+    fn init() ErrWriter {
+        var self: ErrWriter = undefined;
+        self.writer = .init(.stderr(), std.testing.io, &self.buf);
+        return self;
+    }
+
+    fn interface(self: *ErrWriter) *std.Io.Writer {
+        return &self.writer.interface;
+    }
+};
 
 fn cleanupInitPath(path: []const u8) void {
-    // Remove the file and its parent directory chain up to zig-cache/tmp.
     std.Io.Dir.deleteFile(.cwd(), std.testing.io, path) catch {};
-    if (std.fs.path.dirname(path)) |dir| {
-        std.Io.Dir.deleteTree(.cwd(), std.testing.io, dir) catch {};
-    }
 }
 
 test "initCommand: writes a default config with a generated token" {
     const gpa = std.testing.allocator;
     const tmp = "zig-cache/tmp/init-config-default.json";
-    cleanupInitPath(tmp);
     defer cleanupInitPath(tmp);
 
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer);
-    try testing.expectEqual(@as(u8, 0), rc);
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err.interface()));
 
     var cfg = try Config.load(gpa, std.testing.io, &env, tmp);
     defer cfg.deinit(gpa);
@@ -1870,18 +1873,13 @@ test "initCommand: writes a default config with a generated token" {
 test "initCommand: creates a missing parent directory" {
     const gpa = std.testing.allocator;
     const tmp = "zig-cache/tmp/init-fresh/sub/cfg.json";
-    cleanupInitPath(tmp);
     defer cleanupInitPath(tmp);
 
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer);
-    try testing.expectEqual(@as(u8, 0), rc);
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err.interface()));
 
     var cfg = try Config.load(gpa, std.testing.io, &env, tmp);
     defer cfg.deinit(gpa);
@@ -1891,18 +1889,14 @@ test "initCommand: creates a missing parent directory" {
 test "initCommand: refuses to overwrite an existing config" {
     const gpa = std.testing.allocator;
     const tmp = "zig-cache/tmp/init-config-existing.json";
-    cleanupInitPath(tmp);
     defer cleanupInitPath(tmp);
 
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
-
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
+    var err = ErrWriter.init();
 
     // First write establishes an existing config.
-    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer));
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err.interface()));
 
     // Capture the original token so we can verify the bytes are untouched.
     var original = try Config.load(gpa, std.testing.io, &env, tmp);
@@ -1911,11 +1905,7 @@ test "initCommand: refuses to overwrite an existing config" {
     defer gpa.free(original_token);
 
     // Second call without --force must fail and leave the file untouched.
-    var stderr_buf2: [256]u8 = undefined;
-    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
-    const err_writer2 = &stderr_writer2.interface;
-    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer2);
-    try testing.expect(rc != 0);
+    try testing.expect(initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err.interface()) != 0);
 
     var after = try Config.load(gpa, std.testing.io, &env, tmp);
     defer after.deinit(gpa);
@@ -1925,28 +1915,20 @@ test "initCommand: refuses to overwrite an existing config" {
 test "initCommand: --force overwrites an existing config with a fresh token" {
     const gpa = std.testing.allocator;
     const tmp = "zig-cache/tmp/init-config-force.json";
-    cleanupInitPath(tmp);
     defer cleanupInitPath(tmp);
 
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer));
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err.interface()));
 
     var first = try Config.load(gpa, std.testing.io, &env, tmp);
     const first_token = try gpa.dupe(u8, first.auth_token);
     first.deinit(gpa);
     defer gpa.free(first_token);
 
-    // --force overwrites with a fresh token.
-    var stderr_buf2: [256]u8 = undefined;
-    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
-    const err_writer2 = &stderr_writer2.interface;
-    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp, "--force" }, err_writer2));
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp, "--force" }, err.interface()));
 
     var second = try Config.load(gpa, std.testing.io, &env, tmp);
     defer second.deinit(gpa);
@@ -1960,30 +1942,22 @@ test "initCommand: honors --config / env / XDG precedence via resolvePath" {
     const gpa = std.testing.allocator;
     const flag_path = "zig-cache/tmp/init-config-flag.json";
     const env_path = "zig-cache/tmp/init-config-env.json";
-    cleanupInitPath(flag_path);
-    cleanupInitPath(env_path);
     defer cleanupInitPath(flag_path);
     defer cleanupInitPath(env_path);
 
     // --config path takes precedence over env in resolvePath.
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
     try env.put("CURATION_CONFIG", env_path);
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", flag_path }, err_writer));
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", flag_path }, err.interface()));
     var from_flag = try Config.load(gpa, std.testing.io, &env, flag_path);
     defer from_flag.deinit(gpa);
     try testing.expect(from_flag.auth_token.len > 0);
 
     // Without --config, the env path is used.
-    var stderr_buf2: [256]u8 = undefined;
-    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
-    const err_writer2 = &stderr_writer2.interface;
-    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{}, err_writer2));
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{}, err.interface()));
     var from_env = try Config.load(gpa, std.testing.io, &env, env_path);
     defer from_env.deinit(gpa);
     try testing.expect(from_env.auth_token.len > 0);
@@ -1991,28 +1965,20 @@ test "initCommand: honors --config / env / XDG precedence via resolvePath" {
 
 test "initCommand: rejects unknown flags" {
     const gpa = std.testing.allocator;
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    const rc = initCommand(gpa, std.testing.io, &env, &.{"--nope"}, err_writer);
-    try testing.expect(rc != 0);
+    try testing.expect(initCommand(gpa, std.testing.io, &env, &.{"--nope"}, err.interface()) != 0);
 }
 
 test "initCommand: --config without a value errors" {
     const gpa = std.testing.allocator;
-    var env = initTestEnv(gpa);
+    var env = std.process.Environ.Map.init(gpa);
     defer env.deinit();
+    var err = ErrWriter.init();
 
-    var stderr_buf: [256]u8 = undefined;
-    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
-    const err_writer = &stderr_writer.interface;
-
-    const rc = initCommand(gpa, std.testing.io, &env, &.{"--config"}, err_writer);
-    try testing.expect(rc != 0);
+    try testing.expect(initCommand(gpa, std.testing.io, &env, &.{"--config"}, err.interface()) != 0);
 }
 
 test "generateAuthToken: 32 random bytes → 43-char base64url no_pad" {
