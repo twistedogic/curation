@@ -280,12 +280,17 @@ const usage =
     \\usage: curation <command> [flags]
     \\
     \\Commands:
+    \\  init            Write a default config to the resolved path with a
+    \\                  generated bearer token (refuses to overwrite; --force)
     \\  serve           Start the HTTP server
     \\  import <opml>   Merge OPML feed outlines into the config's sources
     \\  help            Show this help
     \\
-    \\Flags for `serve` and `import`:
+    \\Flags for `serve`, `import`, and `init`:
     \\  --config <path>   Path to config.json (overrides $CURATION_CONFIG)
+    \\
+    \\Flag for `init` only:
+    \\  --force            Overwrite an existing config file
     \\
 ;
 
@@ -311,6 +316,9 @@ pub fn run(init_ctx: std.process.Init, allocator: std.mem.Allocator, args: []con
     }
     if (std.mem.eql(u8, cmd, "import")) {
         return importCommand(init_ctx, allocator, args[2..], err_writer);
+    }
+    if (std.mem.eql(u8, cmd, "init")) {
+        return initCommand(allocator, init_ctx.io, init_ctx.environ_map, args[2..], err_writer);
     }
     err_writer.print("unknown command: {s}\n\n{s}", .{ cmd, usage }) catch {};
     err_writer.flush() catch {};
@@ -702,6 +710,122 @@ fn findHeader(request: *std.http.Server.Request, name: []const u8) ?[]const u8 {
         if (std.ascii.eqlIgnoreCase(h.name, name)) return h.value;
     }
     return null;
+}
+
+// ============= init command =============
+
+/// Generate a 32-byte random bearer token encoded as base64url-no-pad.
+/// Inlined here; lift to a shared util only if a second caller appears.
+fn generateAuthToken(gpa: std.mem.Allocator, io: std.Io) std.mem.Allocator.Error![]u8 {
+    var bytes: [32]u8 = undefined;
+    std.Io.random(io, &bytes);
+    const out_len = std.base64.url_safe_no_pad.Encoder.calcSize(bytes.len);
+    const out = try gpa.alloc(u8, out_len);
+    _ = std.base64.url_safe_no_pad.Encoder.encode(out, &bytes);
+    return out;
+}
+
+/// Write a default config to the resolved path and print the path, token,
+/// and next steps. Non-interactive: no fetcher, no scheduler, no server.
+/// Ponytail: exists-check before atomic write, no lock; revisit if concurrent
+/// operators ever share a config path.
+fn initCommand(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    args: []const []const u8,
+    err_writer: *std.Io.Writer,
+) u8 {
+    var config_arg: ?[]const u8 = null;
+    var force = false;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--config")) {
+            if (i + 1 >= args.len) {
+                log_mod.writeLine(err_writer, .err, "flag.error", &.{
+                    .{ .key = "err", .value = "MissingFlagValue" },
+                    .{ .key = "flag", .value = "--config" },
+                }) catch {};
+                err_writer.flush() catch {};
+                return 2;
+            }
+            i += 1;
+            config_arg = args[i];
+        } else if (std.mem.eql(u8, a, "--force")) {
+            force = true;
+        } else {
+            log_mod.writeLine(err_writer, .err, "flag.error", &.{
+                .{ .key = "err", .value = "UnknownFlag" },
+                .{ .key = "flag", .value = a },
+            }) catch {};
+            err_writer.flush() catch {};
+            return 2;
+        }
+    }
+
+    const path = config_mod.Config.resolvePath(gpa, environ_map, config_arg) catch return 1;
+    defer gpa.free(path);
+
+    const exists = if (std.Io.Dir.statFile(.cwd(), io, path, .{})) |_|
+        true
+    else |err| switch (err) {
+        error.FileNotFound => false,
+        else => {
+            log_mod.writeLine(err_writer, .err, "config.init_stat_failed", &.{
+                .{ .key = "err", .value = @errorName(err) },
+                .{ .key = "path", .value = path },
+            }) catch {};
+            err_writer.flush() catch {};
+            return 1;
+        },
+    };
+
+    if (exists and !force) {
+        log_mod.writeLine(err_writer, .err, "config.exists", &.{
+            .{ .key = "path", .value = path },
+        }) catch {};
+        err_writer.flush() catch {};
+        return 1;
+    }
+
+    if (std.fs.path.dirname(path)) |dir| {
+        std.Io.Dir.createDirPath(.cwd(), io, dir) catch |err| {
+            log_mod.writeLine(err_writer, .err, "config.init_mkdir_failed", &.{
+                .{ .key = "err", .value = @errorName(err) },
+                .{ .key = "dir", .value = dir },
+            }) catch {};
+            err_writer.flush() catch {};
+            return 1;
+        };
+    }
+
+    const token = generateAuthToken(gpa, io) catch return 1;
+    defer gpa.free(token);
+
+    const cfg: config_mod.Config = .{ .auth_token = token };
+    config_mod.Config.write(gpa, io, cfg, path) catch |err| {
+        log_mod.writeLine(err_writer, .err, "config.init_write_failed", &.{
+            .{ .key = "err", .value = @errorName(err) },
+            .{ .key = "path", .value = path },
+        }) catch {};
+        err_writer.flush() catch {};
+        return 1;
+    };
+
+    // Stdout is the success channel: the file is the durable source of truth,
+    // the printed token is the once-only bootstrap secret.
+    var stdout_buf: [1024]u8 = undefined;
+    var stdout_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buf);
+    const out = &stdout_writer.interface;
+    out.print("config: {s}\n", .{path}) catch {};
+    out.print("auth_token: {s}\n", .{token}) catch {};
+    out.writeAll("next steps:\n") catch {};
+    out.writeAll("  curation import <opml-file>   add sources\n") catch {};
+    out.writeAll("  curation serve                start the server\n") catch {};
+    out.flush() catch {};
+
+    return 0;
 }
 
 // ============= tests =============
@@ -1695,4 +1819,222 @@ test "handleRequest: GET /download that returns 204 does not bump the generation
     defer gpa.free(text);
     try testing.expect(std.mem.indexOf(u8, text, "curation_epub_generations_total{kind=\"news\"} 0") != null);
     try testing.expect(std.mem.indexOf(u8, text, "curation_epub_generations_total{kind=\"knowledge\"} 0") != null);
+}
+
+// ---- init command ----
+
+fn initTestEnv(gpa: std.mem.Allocator) std.process.Environ.Map {
+    var env = std.process.Environ.Map.init(gpa);
+    return env;
+}
+
+fn cleanupInitPath(path: []const u8) void {
+    // Remove the file and its parent directory chain up to zig-cache/tmp.
+    std.Io.Dir.deleteFile(.cwd(), std.testing.io, path) catch {};
+    if (std.fs.path.dirname(path)) |dir| {
+        std.Io.Dir.deleteTree(.cwd(), std.testing.io, dir) catch {};
+    }
+}
+
+test "initCommand: writes a default config with a generated token" {
+    const gpa = std.testing.allocator;
+    const tmp = "zig-cache/tmp/init-config-default.json";
+    cleanupInitPath(tmp);
+    defer cleanupInitPath(tmp);
+
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer);
+    try testing.expectEqual(@as(u8, 0), rc);
+
+    var cfg = try Config.load(gpa, std.testing.io, &env, tmp);
+    defer cfg.deinit(gpa);
+
+    try testing.expect(cfg.auth_token.len > 0);
+    // Defaults for every other field.
+    try testing.expectEqualStrings("127.0.0.1", cfg.host);
+    try testing.expectEqual(@as(u16, 8787), cfg.port);
+    try testing.expectEqualStrings("04:00", cfg.schedule);
+    try testing.expectEqual(@as(u32, 90), cfg.retention_days);
+    try testing.expectEqual(@as(usize, 0), cfg.sources.len);
+    try testing.expectEqual(@as(u32, 0), cfg.cap);
+    try testing.expectEqualStrings("lightpanda", cfg.lightpanda.path);
+    try testing.expectEqualStrings("pi", cfg.pi.path);
+}
+
+test "initCommand: creates a missing parent directory" {
+    const gpa = std.testing.allocator;
+    const tmp = "zig-cache/tmp/init-fresh/sub/cfg.json";
+    cleanupInitPath(tmp);
+    defer cleanupInitPath(tmp);
+
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer);
+    try testing.expectEqual(@as(u8, 0), rc);
+
+    var cfg = try Config.load(gpa, std.testing.io, &env, tmp);
+    defer cfg.deinit(gpa);
+    try testing.expect(cfg.auth_token.len > 0);
+}
+
+test "initCommand: refuses to overwrite an existing config" {
+    const gpa = std.testing.allocator;
+    const tmp = "zig-cache/tmp/init-config-existing.json";
+    cleanupInitPath(tmp);
+    defer cleanupInitPath(tmp);
+
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    // First write establishes an existing config.
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer));
+
+    // Capture the original token so we can verify the bytes are untouched.
+    var original = try Config.load(gpa, std.testing.io, &env, tmp);
+    const original_token = try gpa.dupe(u8, original.auth_token);
+    original.deinit(gpa);
+    defer gpa.free(original_token);
+
+    // Second call without --force must fail and leave the file untouched.
+    var stderr_buf2: [256]u8 = undefined;
+    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
+    const err_writer2 = &stderr_writer2.interface;
+    const rc = initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer2);
+    try testing.expect(rc != 0);
+
+    var after = try Config.load(gpa, std.testing.io, &env, tmp);
+    defer after.deinit(gpa);
+    try testing.expectEqualStrings(original_token, after.auth_token);
+}
+
+test "initCommand: --force overwrites an existing config with a fresh token" {
+    const gpa = std.testing.allocator;
+    const tmp = "zig-cache/tmp/init-config-force.json";
+    cleanupInitPath(tmp);
+    defer cleanupInitPath(tmp);
+
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp }, err_writer));
+
+    var first = try Config.load(gpa, std.testing.io, &env, tmp);
+    const first_token = try gpa.dupe(u8, first.auth_token);
+    first.deinit(gpa);
+    defer gpa.free(first_token);
+
+    // --force overwrites with a fresh token.
+    var stderr_buf2: [256]u8 = undefined;
+    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
+    const err_writer2 = &stderr_writer2.interface;
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", tmp, "--force" }, err_writer2));
+
+    var second = try Config.load(gpa, std.testing.io, &env, tmp);
+    defer second.deinit(gpa);
+    try testing.expect(second.auth_token.len > 0);
+    // 256 bits of entropy; the probability of two consecutive tokens matching
+    // is ~1/2^256, so equal strings mean --force failed to regenerate.
+    try testing.expect(!std.mem.eql(u8, first_token, second.auth_token));
+}
+
+test "initCommand: honors --config / env / XDG precedence via resolvePath" {
+    const gpa = std.testing.allocator;
+    const flag_path = "zig-cache/tmp/init-config-flag.json";
+    const env_path = "zig-cache/tmp/init-config-env.json";
+    cleanupInitPath(flag_path);
+    cleanupInitPath(env_path);
+    defer cleanupInitPath(flag_path);
+    defer cleanupInitPath(env_path);
+
+    // --config path takes precedence over env in resolvePath.
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+    try env.put("CURATION_CONFIG", env_path);
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{ "--config", flag_path }, err_writer));
+    var from_flag = try Config.load(gpa, std.testing.io, &env, flag_path);
+    defer from_flag.deinit(gpa);
+    try testing.expect(from_flag.auth_token.len > 0);
+
+    // Without --config, the env path is used.
+    var stderr_buf2: [256]u8 = undefined;
+    var stderr_writer2: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf2);
+    const err_writer2 = &stderr_writer2.interface;
+    try testing.expectEqual(@as(u8, 0), initCommand(gpa, std.testing.io, &env, &.{}, err_writer2));
+    var from_env = try Config.load(gpa, std.testing.io, &env, env_path);
+    defer from_env.deinit(gpa);
+    try testing.expect(from_env.auth_token.len > 0);
+}
+
+test "initCommand: rejects unknown flags" {
+    const gpa = std.testing.allocator;
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    const rc = initCommand(gpa, std.testing.io, &env, &.{"--nope"}, err_writer);
+    try testing.expect(rc != 0);
+}
+
+test "initCommand: --config without a value errors" {
+    const gpa = std.testing.allocator;
+    var env = initTestEnv(gpa);
+    defer env.deinit();
+
+    var stderr_buf: [256]u8 = undefined;
+    var stderr_writer: std.Io.File.Writer = .init(.stderr(), std.testing.io, &stderr_buf);
+    const err_writer = &stderr_writer.interface;
+
+    const rc = initCommand(gpa, std.testing.io, &env, &.{"--config"}, err_writer);
+    try testing.expect(rc != 0);
+}
+
+test "generateAuthToken: 32 random bytes → 43-char base64url no_pad" {
+    const gpa = std.testing.allocator;
+    const tok = try generateAuthToken(gpa, std.testing.io);
+    defer gpa.free(tok);
+
+    // 32 bytes → ceil(32 * 4 / 3) = 43 chars (no padding).
+    try testing.expectEqual(@as(usize, 43), tok.len);
+
+    // Verify the alphabet: `A-Z a-z 0-9 - _`.
+    for (tok) |c| {
+        const ok = std.ascii.isAlphanumeric(c) or c == '-' or c == '_';
+        try testing.expect(ok);
+    }
+}
+
+test "generateAuthToken: two calls produce different tokens" {
+    const gpa = std.testing.allocator;
+    const a = try generateAuthToken(gpa, std.testing.io);
+    defer gpa.free(a);
+    const b = try generateAuthToken(gpa, std.testing.io);
+    defer gpa.free(b);
+    try testing.expect(!std.mem.eql(u8, a, b));
 }
