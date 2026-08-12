@@ -32,8 +32,3 @@ tasks:
     desc: Remove build artifacts
     cmds:
       - rm -rf zig-out .zig-cache
-
-  validate:
-    desc: Validate OpenSpec specs and changes (requires openspec CLI)
-    cmds:
-      - npx -y @fission-ai/openspec@latest validate --all

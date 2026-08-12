@@ -40,7 +40,6 @@ task build             # zig build -Doptimize=Debug (OPTIMIZE=ReleaseFast for re
 task test              # zig build test
 task run -- <args>     # build + run, e.g. task run -- serve
 task clean             # rm -rf zig-out .zig-cache
-task validate          # OpenSpec validation (needs Node)
 ```
 
 Never add a dependency or change that breaks `task build` / `task test`.
@@ -82,7 +81,7 @@ Never add a dependency or change that breaks `task build` / `task test`.
 ## Spec-Driven Changes
 
 - Use [OpenSpec](openspec/) (`openspec/specs/` capabilities, `openspec/changes/`
-  proposals) for non-trivial changes. Validate with `task validate` or
+  proposals) for non-trivial changes. Validate with
   `npx -y @fission-ai/openspec@latest validate --all`. Archive a change after merge.
 
 ## CI / Automation
