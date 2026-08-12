@@ -249,7 +249,7 @@ pub const Store = struct {
         errdefer out.deinit(self.gpa);
         for (result_ids) |id| {
             // ids are dense from 1, so record index is id - 1.
-            try out.append(self.gpa, self.records.items[id - 1]);
+            try out.append(self.gpa, self.records.items[@intCast(id - 1)]);
         }
         return out.toOwnedSlice(self.gpa);
     }

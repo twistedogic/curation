@@ -55,12 +55,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: x86_64-linux-gnu
+          - target: x86_64-linux-musl
             suffix: linux-amd64
-          - target: aarch64-linux-gnu
-            suffix: linux-arm64
-          - target: x86_64-macos
-            suffix: darwin-amd64
+          - target: arm-linux-musleabihf
+            suffix: linux-armv7
           - target: aarch64-macos
             suffix: darwin-arm64
 
@@ -75,10 +73,10 @@ jobs:
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
 
       - name: Stage artifact
-        run: cp zig-out/bin/curation curation-${{ matrix.suffix }}
+        run: tar -czf curation-${{ matrix.suffix }}.tar.gz -C zig-out/bin curation
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: curation-${{ matrix.suffix }}
+          files: curation-*.tar.gz
           body: "Release ${{ github.ref_name }}"
